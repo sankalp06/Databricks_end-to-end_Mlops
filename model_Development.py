@@ -173,3 +173,11 @@ if __name__ == "__main__":
     format_type = "parquet"
     # Call the main function
     main(data_path,format_type,target_feature,experiment_name,model)   
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+

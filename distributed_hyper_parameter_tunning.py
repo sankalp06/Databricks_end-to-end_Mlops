@@ -4,7 +4,7 @@ from pyspark.ml.feature import Imputer, StandardScaler, VectorAssembler, StringI
 from pyspark.ml.regression import LinearRegression
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml import Pipeline
-from pyspark.sql.functions import col
+from pyspark.sql.functions import col,log
 from hyperopt import fmin, tpe, hp,Trials
 import mlflow
 import mlflow.spark
@@ -145,7 +145,7 @@ def main(data_path, target_feature, experiment_name, model, param_space,hyeropt_
 
 from pyspark.ml.regression import RandomForestRegressor
 if __name__ == "__main__":
-    data_path = "/FileStore/tables/ToyotaCorolla_sample"
+    data_path = "/mnt/silver_layer/transformed_data.parquet"
     target_feature = "Price"
     experiment_name = "car_price_prediction_rf" 
     hyeropt_metric = "RMSE"
@@ -161,7 +161,7 @@ if __name__ == "__main__":
 
 if __name__ == "__main__":
     from pyspark.ml.regression import GBTRegressor 
-    data_path = "/FileStore/tables/ToyotaCorolla_sample"
+    data_path = "/mnt/silver_layer/transformed_data.parquet"
     target_feature = "Price"
     experiment_name = "car_price_prediction_gbt_"
     param_space = {

@@ -23,8 +23,8 @@ def load_model_with_error_handling(model_run_id, model_type):
 
 # File paths and model run IDs
 inference_data_path = "/mnt/silver_layer/transformed_data.parquet"
-transformation_pipeline_run_id = 'c785f58cc34341ab8ffa8b59b30f8fc1/transformation'
-ml_pipeline_run_id = 'c785f58cc34341ab8ffa8b59b30f8fc1/model'
+transformation_pipeline_run_id = '124c33a75d3b410a9d8c9cb03f2180fb/transformation'
+ml_pipeline_run_id = '124c33a75d3b410a9d8c9cb03f2180fb/model'
 
 # Read data
 df_read = read_data(inference_data_path)
