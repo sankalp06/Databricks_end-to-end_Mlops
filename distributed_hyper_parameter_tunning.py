@@ -1,29 +1,21 @@
 # Databricks notebook source
 from pyspark.sql import SparkSession
 from pyspark.ml.feature import Imputer, StandardScaler, VectorAssembler, StringIndexer, OneHotEncoder
-from pyspark.ml.evaluation import MulticlassClassificationEvaluator, BinaryClassificationEvaluator
+from pyspark.ml.regression import LinearRegression
+from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml import Pipeline
-from pyspark.sql.functions import col, log
+from pyspark.sql.functions import col
+from hyperopt import fmin, tpe, hp,Trials
+import mlflow
+import mlflow.spark
+import mlflow.pyfunc
+from datetime import datetime
 
-
-def load_data(data_path, format_type, version=None):
-    if format_type == 'parquet':
-        return spark.read.parquet(data_path, header=True)
-    elif format_type == 'delta':
-        if version is not None:
-            delta_table = spark.read.format("delta").option("versionAsOf", version).load(data_path)
-            delta_dataframe = delta_table.toDF()
-            return delta_dataframe
-        else:
-            return spark.read.format("delta").load(data_path).toDF()
-    else:
-        raise ValueError("Invalid data format. Supported formats are 'parquet' and 'delta'.")
-
+def load_data(data_path):
+    return spark.read.parquet(data_path, header=True)
 
 def get_feature_columns(df, data_type):
     return [col_name for col_name, dt in df.dtypes if dt == data_type]
-
-
 
 def preprocess_data(df, target_column):
     try:
@@ -69,55 +61,21 @@ def preprocess_data(df, target_column):
         print(f"An error occurred: {str(e)}")
         return None, None
 
-
-
 def build_model(train_data, model, target_feature, features_col="scaled_features"):
-    # Assuming 'model' is an instance of a Spark MLlib model (e.g., LogisticRegression)
     model.setFeaturesCol(features_col)
     model.setLabelCol(target_feature)
     model_pipeline = Pipeline(stages=[model])
     trained_model = model_pipeline.fit(train_data)
     return trained_model
 
-def evaluate_classification_model(model, test_data, label_col="cid"):
-    predictions = model.transform(test_data)
-    evaluator_multi = MulticlassClassificationEvaluator(labelCol=label_col, metricName="accuracy")
-    accuracy = evaluator_multi.evaluate(predictions)
-    evaluator_binary = BinaryClassificationEvaluator(labelCol=label_col)
-    auc_roc = evaluator_binary.evaluate(predictions)
-    confusion_matrix = predictions.groupBy(label_col, "prediction").count()
-    tp_row = confusion_matrix.filter((col(label_col) == 1) & (col("prediction") == 1)).first()
-    true_positive = tp_row["count"] if tp_row else 0
-    fp_row = confusion_matrix.filter((col(label_col) == 0) & (col("prediction") == 1)).first()
-    false_positive = fp_row["count"] if fp_row else 0
-    fn_row = confusion_matrix.filter((col(label_col) == 1) & (col("prediction") == 0)).first()
-    false_negative = fn_row["count"] if fn_row else 0
-    precision = true_positive / (true_positive + false_positive) if (true_positive + false_positive) > 0 else 0
-    recall = true_positive / (true_positive + false_negative) if (true_positive + false_negative) > 0 else 0
-    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-    return {
-        "Accuracy": accuracy,
-        "AUC-ROC": auc_roc,
-        "Precision": precision,
-        "Recall": recall,
-        "F1 Score": f1_score
-    }
-
-
-from pyspark.ml.evaluation import RegressionEvaluator
-
 def evaluate_regression_model(model, test_data, label_col="Price"):
     predictions = model.transform(test_data)
-    # RegressionEvaluator for MSE
     evaluator_mse = RegressionEvaluator(labelCol=label_col, predictionCol="prediction", metricName="mse")
     mse = evaluator_mse.evaluate(predictions)
-    # RegressionEvaluator for RMSE
     evaluator_rmse = RegressionEvaluator(labelCol=label_col, predictionCol="prediction", metricName="rmse")
     rmse = evaluator_rmse.evaluate(predictions)
-    # RegressionEvaluator for MAE
     evaluator_mae = RegressionEvaluator(labelCol=label_col, predictionCol="prediction", metricName="mae")
     mae = evaluator_mae.evaluate(predictions)
-    # R-squared
     evaluator_r2 = RegressionEvaluator(labelCol=label_col, predictionCol="prediction", metricName="r2")
     r2 = evaluator_r2.evaluate(predictions)
 
@@ -125,51 +83,98 @@ def evaluate_regression_model(model, test_data, label_col="Price"):
         "MSE": mse,
         "RMSE": rmse,
         "MAE": mae,
-        "R-squared": r2
+        "R2": r2
     }
 
-def create_experiment(experiment_name, performance_metrics, transformation_pipeline,model_pipeline,run_params=None):
-    import mlflow
-    import mlflow.spark
-    from datetime import datetime
-    run_name=experiment_name+str(datetime.now().strftime("%d-%m-%y"))
-    
-    with mlflow.start_run(run_name=run_name):
+def create_experiment(experiment_name, performance_metrics, transformation_pipeline, model_pipeline, run_params=None):
+    run_name = experiment_name + str(datetime.now().strftime("%d-%m-%y"))
+    with mlflow.start_run(run_name=run_name, nested=True):
         if not run_params == None:
             for param in run_params:
                 mlflow.log_param(param, run_params[param])
-            
-        for metric in performance_metrics:
-            mlflow.log_metric(metric, performance_metrics[metric])
-        #mlflow.sklearn.log_model(pipeline, "ml_pipline_2")
+
+        for metric, value in performance_metrics.items():
+            mlflow.log_metric(metric, value)
+
+        # for stage in model_pipeline.stages:
+        #     mlflow.log_params(stage.extractParamMap())
+
         mlflow.spark.log_model(model_pipeline, "model")
         mlflow.spark.log_model(transformation_pipeline, "transformation")
-        #mlflow.set_tag("model", model_name)
-            
 
-def main(data_path,format_type,target_feature,experiment_name,model):
-    df = load_data(data_path,format_type)
-    # Preprocess the data
-    transformation_pipeline,transformed_data = preprocess_data(df, target_feature)
-    # Split the data into training and test sets
+def main(data_path, target_feature, experiment_name, model, param_space,hyeropt_metric):
+    df = load_data(data_path)
+    transformation_pipeline, transformed_data = preprocess_data(df, target_feature)
     transformed_data = transformed_data.withColumn("target_log", log(col(target_feature)))
-        # Split the data into training and test sets
     train_data, test_data = transformed_data.randomSplit([0.8, 0.2], seed=42)
-    display(train_data)
-    # Build and train the model
-    model_pipeline = build_model(train_data, model, "target_log")
-    # Evaluate the model
-    performance_metrics = evaluate_regression_model(model_pipeline, test_data)
-    print(performance_metrics)
-    create_experiment(experiment_name, performance_metrics, transformation_pipeline, model_pipeline)
+
+    def objective(params):
+        model_instance = model()
+        model_instance.setParams(**params)
+        model_pipeline = build_model(train_data, model_instance, "target_log")
+        performance = evaluate_regression_model(model_pipeline, test_data)
+        return performance[hyeropt_metric]
+    
+    trials = Trials()
+    mlflow.pyspark.ml.autolog(log_models=False)
+    max_evals = 2
+    # Check if there's an active run, and end it
+    if mlflow.active_run():
+        mlflow.end_run()
+
+    best_params = fmin(fn=objective,
+                       space=param_space,
+                       algo=tpe.suggest,
+                       max_evals=max_evals,
+                       trials=trials)
+    print(best_params)
+
+    # Retrain model on the entire dataset with best hyperparameters
+    best_model_instance = model()
+    best_model_instance.setParams(**best_params)
+    trained_best_model_pipeline = build_model(transformed_data, best_model_instance, target_feature)
+
+    # Evaluate the best model on the test set
+    performance_best_model = evaluate_regression_model(trained_best_model_pipeline, test_data)
+
+    # Save the best model and relevant information
+    create_experiment(experiment_name, performance_best_model, transformation_pipeline, trained_best_model_pipeline, best_params)
+
+
+# COMMAND ----------
+
+from pyspark.ml.regression import RandomForestRegressor
+if __name__ == "__main__":
+    data_path = "/FileStore/tables/ToyotaCorolla_sample"
+    target_feature = "Price"
+    experiment_name = "car_price_prediction_rf" 
+    hyeropt_metric = "RMSE"
+    param_space_rf = {
+        'maxDepth': hp.choice('maxDepth', range(5, 16)),
+        'numTrees': hp.choice('numTrees', range(10, 101))
+    }
+
+    main(data_path, target_feature, experiment_name, RandomForestRegressor, param_space_rf,hyeropt_metric)
+
+# COMMAND ----------
+
 
 if __name__ == "__main__":
-    # Specify the data path and target feature
-    from pyspark.ml.regression import LinearRegression
-    data_path = "/mnt/silver_layer/transformed_data.parquet"
-    model = LinearRegression()
-    experiment_name = "car_price_prediction_"
-    target_feature="Price"
-    format_type = "parquet"
-    # Call the main function
-    main(data_path,format_type,target_feature,experiment_name,model)   
+    from pyspark.ml.regression import GBTRegressor 
+    data_path = "/FileStore/tables/ToyotaCorolla_sample"
+    target_feature = "Price"
+    experiment_name = "car_price_prediction_gbt_"
+    param_space = {
+        'maxDepth': hp.choice('maxDepth', range(5, 16)),
+        'maxBins': hp.choice('maxBins', [32, 64, 128]),
+        #'minInstancesPerNode': hp.choice('minInstancesPerNode', [5, 10]),
+        'subsamplingRate': hp.uniform('subsamplingRate', 0.5, 1.0)
+    }
+    hyeropt_metric = "RMSE"
+
+    main(data_path, target_feature, experiment_name, GBTRegressor, param_space, hyeropt_metric)
+
+
+# COMMAND ----------
+
+
