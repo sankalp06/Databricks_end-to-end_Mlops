@@ -1,0 +1,9 @@
+{
+	"name": "Data-factory-iscs",
+	"location": "southindia",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "094c3079-89d2-40f0-b8f5-2d5055ba1630",
+		"tenantId": "eaf7202d-efb3-437a-a103-505bb9fbf75f"
+	}
+}
