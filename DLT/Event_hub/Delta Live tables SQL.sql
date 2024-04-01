@@ -1,4 +1,3 @@
-
 CREATE OR REFRESH STREAMING TABLE sql_first_step
 AS 
 SELECT * FROM cloud_files(
