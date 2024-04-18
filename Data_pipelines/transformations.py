@@ -122,3 +122,23 @@ data_df.write.mode("overwrite").parquet("/mnt/silver_layer/transformed_data.parq
 # Read the Parquet file
 parquet_file_path = "/mnt/silver_layer/transformed_data.parquet"
 df = spark.read.parquet(parquet_file_path)
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+df11.show()
+
+# COMMAND ----------
+
+

@@ -53,4 +53,21 @@ if not any(mount.mountPoint == mount_point for mount in mounts):
 
 # COMMAND ----------
 
+# Define the mount point and connection details
+mount_point = "/mnt/inference_layer"
+storage_account_name = "storageiscs"
+container_name = "inference"
+
+mounts = dbutils.fs.mounts()
+if not any(mount.mountPoint == mount_point for mount in mounts):
+  dbutils.fs.mount(
+    source="wasbs://"+container_name+"@"+storage_account_name+".blob.core.windows.net",
+    mount_point=mount_point,
+    extra_configs={
+      "fs.azure.account.key."+storage_account_name+".blob.core.windows.net": dbutils.secrets.get('DatalakeScope','StorageSecretKey')
+    }
+  )
+
+# COMMAND ----------
+
 dbutils.secrets.listScopes()
